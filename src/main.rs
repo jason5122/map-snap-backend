@@ -1,59 +1,66 @@
-use axum::{
-    http::StatusCode,
-    routing::{get, post},
-    Json, Router,
-};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use std::time::Duration;
+
+use axum::{routing::get, Router};
+use tokio::net::TcpListener;
+use tokio::signal;
+use tokio::time::sleep;
+use tower_http::timeout::TimeoutLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/photos", get(photos))
-        .route("/users", post(create_user));
+    // Enable tracing.
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "example_graceful_shutdown=debug,tower_http=debug,axum=trace".into()
+            }),
+        )
+        .with(tracing_subscriber::fmt::layer().without_time())
+        .init();
 
-    let address = if cfg!(debug_assertions) {
-        "localhost"
-    } else {
-        "0.0.0.0"
-    };
-    let port = "8000";
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", address, port))
+    // Create a regular axum app.
+    let app = Router::new()
+        .route("/slow", get(|| sleep(Duration::from_secs(5))))
+        .route("/forever", get(std::future::pending::<()>))
+        .layer((
+            TraceLayer::new_for_http(),
+            // Graceful shutdown will wait for outstanding requests to complete. Add a timeout so
+            // requests don't hang forever.
+            TimeoutLayer::new(Duration::from_secs(10)),
+        ));
+
+    // Create a `TcpListener` using tokio.
+    let listener = TcpListener::bind("0.0.0.0:8000").await.unwrap();
+
+    // Run the server with graceful shutdown
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
-    axum::serve(listener, app).await.unwrap();
 }
 
-async fn root() -> &'static str {
-    "Hello, World!"
-}
-
-async fn photos() -> Json<Value> {
-    Json(json!({
-      "photos ": [
-        { "id": 0, "lat": 10, "long": 10 },
-        { "id": 1, "lat": 10, "long": 10 }
-      ]
-    }))
-}
-
-async fn create_user(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
-    let user = User {
-        id: 1337,
-        username: payload.username,
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
-    (StatusCode::CREATED, Json(user))
-}
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
 
-#[derive(Deserialize)]
-struct CreateUser {
-    username: String,
-}
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
-#[derive(Serialize)]
-struct User {
-    id: u64,
-    username: String,
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
