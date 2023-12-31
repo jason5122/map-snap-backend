@@ -1,17 +1,16 @@
 use std::time::Duration;
 
 use axum::{
-    http::StatusCode,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+mod routes;
 
 #[tokio::main]
 async fn main() {
@@ -25,9 +24,9 @@ async fn main() {
         .init();
 
     let app = Router::new()
-        .route("/", get(root))
-        .route("/photos", get(photos))
-        .route("/users", post(create_user))
+        .route("/", get(routes::root))
+        .route("/photos", get(routes::photos))
+        .route("/users", post(routes::create_user))
         .layer((
             TraceLayer::new_for_http(),
             // Graceful shutdown will wait for outstanding requests to complete. Add a timeout so
@@ -45,44 +44,10 @@ async fn main() {
         .await
         .unwrap();
 
-    // Run the server with graceful shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
-}
-
-async fn root() -> &'static str {
-    "Hello, World!"
-}
-
-async fn photos() -> Json<Value> {
-    Json(json!({
-      "photos ": [
-        { "id": 0, "lat": 10, "long": 10 },
-        { "id": 1, "lat": 10, "long": 10 }
-      ]
-    }))
-}
-
-async fn create_user(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
-    let user = User {
-        id: 1337,
-        username: payload.username,
-    };
-
-    (StatusCode::CREATED, Json(user))
-}
-
-#[derive(Deserialize)]
-struct CreateUser {
-    username: String,
-}
-
-#[derive(Serialize)]
-struct User {
-    id: u64,
-    username: String,
 }
 
 async fn shutdown_signal() {
