@@ -1,16 +1,20 @@
 use std::time::Duration;
 
-use axum::{routing::get, Router};
+use axum::{
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::signal;
-use tokio::time::sleep;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    // Enable tracing.
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -20,10 +24,10 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
-    // Create a regular axum app.
     let app = Router::new()
-        .route("/slow", get(|| sleep(Duration::from_secs(5))))
-        .route("/forever", get(std::future::pending::<()>))
+        .route("/", get(root))
+        .route("/photos", get(photos))
+        .route("/users", post(create_user))
         .layer((
             TraceLayer::new_for_http(),
             // Graceful shutdown will wait for outstanding requests to complete. Add a timeout so
@@ -31,14 +35,54 @@ async fn main() {
             TimeoutLayer::new(Duration::from_secs(10)),
         ));
 
-    // Create a `TcpListener` using tokio.
-    let listener = TcpListener::bind("0.0.0.0:8000").await.unwrap();
+    let address = if cfg!(debug_assertions) {
+        "localhost"
+    } else {
+        "0.0.0.0"
+    };
+    let port = "8000";
+    let listener = TcpListener::bind(format!("{}:{}", address, port))
+        .await
+        .unwrap();
 
     // Run the server with graceful shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+}
+
+async fn root() -> &'static str {
+    "Hello, World!"
+}
+
+async fn photos() -> Json<Value> {
+    Json(json!({
+      "photos ": [
+        { "id": 0, "lat": 10, "long": 10 },
+        { "id": 1, "lat": 10, "long": 10 }
+      ]
+    }))
+}
+
+async fn create_user(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
+    let user = User {
+        id: 1337,
+        username: payload.username,
+    };
+
+    (StatusCode::CREATED, Json(user))
+}
+
+#[derive(Deserialize)]
+struct CreateUser {
+    username: String,
+}
+
+#[derive(Serialize)]
+struct User {
+    id: u64,
+    username: String,
 }
 
 async fn shutdown_signal() {
