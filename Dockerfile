@@ -5,7 +5,7 @@
 # https://docs.docker.com/go/dockerfile-reference/
 
 ARG RUST_VERSION=1.72.1
-ARG APP_NAME=journeys-backend
+ARG APP_NAME=map-snap-backend
 
 ################################################################################
 # xx is a helper for cross-compilation.

@@ -2,6 +2,7 @@
 
 IMAGE_NAME="map-snap-backend"
 
+# Using `--no-cache` will rebuild from scratch.
 docker build --tag "$IMAGE_NAME" .
 docker build --tag "$IMAGE_NAME" --platform="linux/amd64" .
 docker run --detach --publish 8000:8000 --name "$IMAGE_NAME" "$IMAGE_NAME"
