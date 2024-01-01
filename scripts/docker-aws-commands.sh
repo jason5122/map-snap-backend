@@ -1,19 +1,23 @@
 #!/bin/bash
 
-docker build --tag docker-rust-image .
-docker build --tag docker-rust-image --platform="linux/amd64" . # build for x86
-docker run --detach --publish 8000:8000 --name docker-rust-container docker-rust-image
+IMAGE_NAME="map-snap-backend"
 
-docker stop docker-rust-container
-docker start docker-rust-container
+docker build --tag "$IMAGE_NAME" .
+docker build --tag "$IMAGE_NAME" --platform="linux/amd64" .
+docker run --detach --publish 8000:8000 --name "$IMAGE_NAME" "$IMAGE_NAME"
 
-docker rm docker-rust-container
+docker start "$IMAGE_NAME"
+docker stop "$IMAGE_NAME"
+
+docker rm "$IMAGE_NAME"
 
 # AWS ECR
 REGISTRY_URL="759384306288.dkr.ecr.us-east-1.amazonaws.com"
 
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REGISTRY_URL"
 
-docker tag docker-rust-image:latest "$REGISTRY_URL"/my-repository
-docker push "$REGISTRY_URL"/my-repository
-docker image inspect "$REGISTRY_URL"/my-repository:latest # verify arch
+aws ecr create-repository --repository-name "$IMAGE_NAME" --region us-east-1
+
+docker tag "$IMAGE_NAME":latest "$REGISTRY_URL"/"$IMAGE_NAME":latest
+docker push "$REGISTRY_URL"/"$IMAGE_NAME"
+docker image inspect "$REGISTRY_URL"/"$IMAGE_NAME":latest
